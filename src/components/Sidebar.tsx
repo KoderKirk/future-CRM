@@ -2,12 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Users, Briefcase, Tag } from 'lucide-react'
+import { Users, Briefcase, Tag, Archive } from 'lucide-react'
 
 const navItems = [
   { label: 'Contacts', href: '/contacts', icon: Users },
   { label: 'Projects', href: '/projects', icon: Briefcase },
   { label: 'Category', href: '/category', icon: Tag },
+  { label: 'Archive',  href: '/archive',  icon: Archive },
 ]
 
 export default function Sidebar() {
@@ -22,7 +23,7 @@ export default function Sidebar() {
       </div>
       <nav className="flex-1 p-3 space-y-0.5">
         {navItems.map(({ label, href, icon: Icon }) => {
-          const isActive = pathname === href
+          const isActive = pathname.startsWith(href)
           return (
             <Link
               key={href}

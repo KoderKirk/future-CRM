@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, X } from 'lucide-react'
-import type { Category } from '@/types'
+import { Plus, X, Archive, Trash2 } from 'lucide-react'
+import { useCRM } from '@/context/CRMContext'
 
 const COLOR_OPTIONS = [
   { value: 'indigo',  bg: 'bg-indigo-500',  badge: 'bg-indigo-900/40 text-indigo-300' },
@@ -18,32 +18,21 @@ const COLOR_OPTIONS = [
 function getBadgeClass(color: string) {
   return COLOR_OPTIONS.find(c => c.value === color)?.badge ?? 'bg-zinc-800 text-zinc-300'
 }
-
 function getBgClass(color: string) {
   return COLOR_OPTIONS.find(c => c.value === color)?.bg ?? 'bg-zinc-500'
 }
 
-const SAMPLE_CATEGORIES: Category[] = [
-  { id: '1', name: 'LP',           color: 'blue',    description: 'Limited partners',           contactCount: 3 },
-  { id: '2', name: 'GP',           color: 'purple',  description: 'General partners',           contactCount: 1 },
-  { id: '3', name: 'Tier 1',       color: 'emerald', description: 'Top-tier relationships',     contactCount: 2 },
-  { id: '4', name: 'Venture',      color: 'amber',   description: 'Venture capital contacts',   contactCount: 2 },
-  { id: '5', name: 'PE',           color: 'rose',    description: 'Private equity contacts',    contactCount: 1 },
-  { id: '6', name: 'Pension Fund', color: 'cyan',    description: 'Pension fund allocators',    contactCount: 1 },
-  { id: '7', name: 'FoF',          color: 'indigo',  description: 'Fund of funds',              contactCount: 1 },
-  { id: '8', name: 'Co-investor',  color: 'pink',    description: 'Co-investment partners',     contactCount: 1 },
-]
-
 const BLANK = { name: '', color: 'indigo', description: '' }
 
 export default function CategoryPage() {
-  const [categories, setCategories] = useState<Category[]>(SAMPLE_CATEGORIES)
-  const [isAdding, setAdding]       = useState(false)
-  const [form, setForm]             = useState({ ...BLANK })
+  const { categories, addCategory, deleteCategory, archiveCategory } = useCRM()
+  const [isAdding, setAdding]         = useState(false)
+  const [form, setForm]               = useState({ ...BLANK })
+  const [confirmDeleteId, setConfirm] = useState<string | null>(null)
 
-  function addCategory() {
+  function handleAdd() {
     if (!form.name.trim()) return
-    setCategories(prev => [...prev, { ...form, id: Date.now().toString(), contactCount: 0 }])
+    addCategory(form)
     setForm({ ...BLANK })
     setAdding(false)
   }
@@ -68,12 +57,29 @@ export default function CategoryPage() {
               <span className={`px-3 py-1 rounded-full text-sm font-medium ${getBadgeClass(cat.color)}`}>
                 {cat.name}
               </span>
-              <button
-                onClick={() => setCategories(prev => prev.filter(c => c.id !== cat.id))}
-                className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-zinc-300 transition-all mt-0.5"
-              >
-                <X size={13} />
-              </button>
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() => archiveCategory(cat.id)}
+                  title="Archive"
+                  className="p-1 text-zinc-600 hover:text-zinc-300 transition-colors"
+                >
+                  <Archive size={12} />
+                </button>
+                {confirmDeleteId === cat.id ? (
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { deleteCategory(cat.id); setConfirm(null) }} className="text-xs font-medium text-red-400 hover:text-red-300 px-1">Yes</button>
+                    <button onClick={() => setConfirm(null)} className="text-xs text-zinc-500 hover:text-zinc-300 px-1">No</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirm(cat.id)}
+                    title="Delete"
+                    className="p-1 text-zinc-600 hover:text-red-400 transition-colors"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
             </div>
             {cat.description && (
               <p className="text-xs text-zinc-500 mt-3 leading-relaxed">{cat.description}</p>
@@ -84,6 +90,10 @@ export default function CategoryPage() {
           </div>
         ))}
       </div>
+
+      {categories.length === 0 && (
+        <div className="text-center py-16 text-zinc-600 text-sm">No categories yet. Add your first one.</div>
+      )}
 
       {isAdding && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setAdding(false)}>
@@ -129,7 +139,7 @@ export default function CategoryPage() {
             </div>
             <div className="flex gap-3 mt-6">
               <button
-                onClick={addCategory}
+                onClick={handleAdd}
                 disabled={!form.name.trim()}
                 className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
               >

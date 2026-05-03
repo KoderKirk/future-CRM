@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, X, Briefcase } from 'lucide-react'
+import { Plus, X, Briefcase, Archive, Trash2 } from 'lucide-react'
+import { useCRM } from '@/context/CRMContext'
 import type { Project } from '@/types'
 
 const STATUS_STYLES: Record<Project['status'], string> = {
@@ -10,21 +11,17 @@ const STATUS_STYLES: Record<Project['status'], string> = {
   closed:   'bg-zinc-800 text-zinc-400',
 }
 
-const SAMPLE_PROJECTS: Project[] = [
-  { id: '1', name: 'PT30 II',    type: 'fund',     description: 'Second fund vehicle targeting private equity.',    status: 'active' },
-  { id: '2', name: 'GP Raise Q3', type: 'mandate', description: 'General partner capital raise mandate for Q3.',    status: 'pipeline' },
-]
-
 const BLANK = { name: '', type: 'fund' as Project['type'], description: '', status: 'pipeline' as Project['status'] }
 
 export default function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[]>(SAMPLE_PROJECTS)
-  const [isAdding, setAdding]   = useState(false)
-  const [form, setForm]         = useState({ ...BLANK })
+  const { projects, addProject, deleteProject, archiveProject } = useCRM()
+  const [isAdding, setAdding]         = useState(false)
+  const [form, setForm]               = useState({ ...BLANK })
+  const [confirmDeleteId, setConfirm] = useState<string | null>(null)
 
-  function addProject() {
+  function handleAdd() {
     if (!form.name.trim()) return
-    setProjects(prev => [...prev, { ...form, id: Date.now().toString() }])
+    addProject(form)
     setForm({ ...BLANK })
     setAdding(false)
   }
@@ -43,14 +40,40 @@ export default function ProjectsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {projects.map(project => (
-          <div key={project.id} className="bg-[#111] border border-[#1e1e1e] rounded-xl p-5 hover:border-[#2a2a2a] transition-colors cursor-pointer">
+          <div key={project.id} className="bg-[#111] border border-[#1e1e1e] rounded-xl p-5 hover:border-[#2a2a2a] transition-colors group relative">
             <div className="flex items-start justify-between">
               <div className="p-2 bg-[#1a1a1a] rounded-lg">
                 <Briefcase size={15} className="text-indigo-400" />
               </div>
-              <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[project.status]}`}>
-                {project.status}
-              </span>
+              <div className="flex items-center gap-1">
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[project.status]}`}>
+                  {project.status}
+                </span>
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
+                  <button
+                    onClick={() => archiveProject(project.id)}
+                    title="Archive"
+                    className="p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a] rounded transition-colors"
+                  >
+                    <Archive size={13} />
+                  </button>
+                  {confirmDeleteId === project.id ? (
+                    <div className="flex items-center gap-1 bg-[#1e1010] border border-red-900/40 rounded px-2 py-1">
+                      <span className="text-xs text-red-400">Delete?</span>
+                      <button onClick={() => { deleteProject(project.id); setConfirm(null) }} className="text-xs font-medium text-red-400 hover:text-red-300 px-1">Yes</button>
+                      <button onClick={() => setConfirm(null)} className="text-xs text-zinc-500 hover:text-zinc-300 px-1">No</button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirm(project.id)}
+                      title="Delete"
+                      className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
             <h3 className="font-semibold mt-4">{project.name}</h3>
             <p className="text-xs text-indigo-400 mt-0.5 capitalize">{project.type}</p>
@@ -69,6 +92,10 @@ export default function ProjectsPage() {
         </button>
       </div>
 
+      {projects.length === 0 && (
+        <div className="text-center py-16 text-zinc-600 text-sm">No projects yet. Add your first one.</div>
+      )}
+
       {isAdding && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setAdding(false)}>
           <div className="bg-[#111] border border-[#2a2a2a] rounded-xl w-[440px] p-6" onClick={e => e.stopPropagation()}>
@@ -83,6 +110,7 @@ export default function ProjectsPage() {
                   placeholder="e.g. PT30 II, GP Raise"
                   value={form.name}
                   onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                  autoFocus
                   className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -125,7 +153,7 @@ export default function ProjectsPage() {
             </div>
             <div className="flex gap-3 mt-6">
               <button
-                onClick={addProject}
+                onClick={handleAdd}
                 disabled={!form.name.trim()}
                 className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
               >

@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, X, Search, Edit2 } from 'lucide-react'
-import type { Contact, CustomColumn } from '@/types'
+import { Plus, X, Search, Edit2, Archive, Trash2 } from 'lucide-react'
+import { useCRM } from '@/context/CRMContext'
+import type { Contact } from '@/types'
 
 const CATEGORY_COLORS: Record<string, string> = {
   'LP':           'bg-blue-900/40 text-blue-300',
@@ -14,39 +15,31 @@ const CATEGORY_COLORS: Record<string, string> = {
   'FoF':          'bg-indigo-900/40 text-indigo-300',
   'Co-investor':  'bg-pink-900/40 text-pink-300',
 }
-
 function getCategoryColor(cat: string) {
   return CATEGORY_COLORS[cat] ?? 'bg-zinc-800 text-zinc-300'
 }
 
-const SAMPLE_CONTACTS: Contact[] = [
-  { id: '1', name: 'Sarah Chen',     organization: 'Sequoia Capital', phone: '+1 (415) 555-0193', email: 'sarah.chen@sequoia.com',     type: 'LP',          categories: ['Venture', 'Tier 1'] },
-  { id: '2', name: 'Marcus Johnson', organization: 'Blackstone',      phone: '+1 (212) 555-0102', email: 'm.johnson@blackstone.com',   type: 'GP',          categories: ['PE', 'Tier 1'] },
-  { id: '3', name: 'Priya Patel',    organization: 'CPPIB',           phone: '+1 (416) 555-0178', email: 'priya.patel@cppib.com',      type: 'LP',          categories: ['Pension Fund'] },
-  { id: '4', name: 'David Kim',      organization: 'a16z',            phone: '+1 (650) 555-0134', email: 'd.kim@a16z.com',             type: 'LP',          categories: ['Venture'] },
-  { id: '5', name: 'Lisa Thompson',  organization: 'Hamilton Lane',   phone: '+1 (610) 555-0156', email: 'l.thompson@hamiltonlane.com', type: 'Co-investor', categories: ['FoF'] },
-]
-
 const CONTACT_TYPES = ['LP', 'GP', 'Advisor', 'Co-investor', 'Service Provider', 'Portfolio', 'Other']
-const DEFAULT_CATEGORIES = ['LP', 'GP', 'Tier 1', 'Venture', 'PE', 'Pension Fund', 'FoF', 'Co-investor']
-
-const BLANK_CONTACT = { name: '', organization: '', phone: '', email: '', type: 'LP', categories: [] as string[] }
+const BLANK = { name: '', organization: '', phone: '', email: '', type: 'LP', categories: [] as string[] }
 
 function toggleCat(arr: string[], cat: string) {
   return arr.includes(cat) ? arr.filter(c => c !== cat) : [...arr, cat]
 }
 
 export default function ContactsPage() {
-  const [contacts, setContacts]           = useState<Contact[]>(SAMPLE_CONTACTS)
-  const [customColumns, setCustomColumns] = useState<CustomColumn[]>([])
-  const [categories]                      = useState<string[]>(DEFAULT_CATEGORIES)
-  const [selectedContact, setSelected]    = useState<Contact | null>(null)
+  const {
+    contacts, categories, customColumns,
+    addContact, updateContact, deleteContact, archiveContact, addCustomColumn,
+  } = useCRM()
+
+  const [selectedContact, setSelected]   = useState<Contact | null>(null)
   const [editingContact, setEditing]      = useState<Contact | null>(null)
   const [isAddingContact, setAddContact]  = useState(false)
   const [isAddingColumn, setAddColumn]    = useState(false)
   const [searchQuery, setSearch]          = useState('')
-  const [newContact, setNewContact]       = useState({ ...BLANK_CONTACT })
+  const [newContact, setNewContact]       = useState({ ...BLANK })
   const [newColumnLabel, setColLabel]     = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const filtered = contacts.filter(c =>
     [c.name, c.organization, c.email].some(v =>
@@ -54,26 +47,38 @@ export default function ContactsPage() {
     )
   )
 
-  function addContact() {
+  function handleAddContact() {
     if (!newContact.name.trim()) return
-    setContacts(prev => [...prev, { ...newContact, id: Date.now().toString() }])
-    setNewContact({ ...BLANK_CONTACT })
+    addContact(newContact)
+    setNewContact({ ...BLANK })
     setAddContact(false)
   }
 
-  function addColumn() {
+  function handleAddColumn() {
     if (!newColumnLabel.trim()) return
-    const key = newColumnLabel.toLowerCase().replace(/\s+/g, '_')
-    setCustomColumns(prev => [...prev, { id: Date.now().toString(), label: newColumnLabel, key }])
+    addCustomColumn(newColumnLabel)
     setColLabel('')
     setAddColumn(false)
   }
 
   function saveEdit() {
     if (!editingContact) return
-    setContacts(prev => prev.map(c => c.id === editingContact.id ? editingContact : c))
+    updateContact(editingContact)
     setSelected(editingContact)
     setEditing(null)
+  }
+
+  function handleArchive(id: string) {
+    archiveContact(id)
+    setSelected(null)
+    setEditing(null)
+  }
+
+  function handleDelete(id: string) {
+    deleteContact(id)
+    setSelected(null)
+    setEditing(null)
+    setConfirmDelete(false)
   }
 
   const allColumns = [
@@ -88,9 +93,8 @@ export default function ContactsPage() {
 
   return (
     <div className="flex h-full">
-      {/* ── Table area ── */}
+      {/* ── Table ── */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
         <div className="px-8 py-5 border-b border-[#1e1e1e] flex items-center justify-between gap-4 shrink-0">
           <h2 className="text-lg font-semibold">Contacts</h2>
           <div className="flex items-center gap-2.5">
@@ -119,7 +123,6 @@ export default function ContactsPage() {
           </div>
         </div>
 
-        {/* Table */}
         <div className="flex-1 overflow-auto">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-[#0a0a0a] z-10">
@@ -135,7 +138,7 @@ export default function ContactsPage() {
               {filtered.map(contact => (
                 <tr
                   key={contact.id}
-                  onClick={() => { setSelected(contact); setEditing(null) }}
+                  onClick={() => { setSelected(contact); setEditing(null); setConfirmDelete(false) }}
                   className={`border-b border-[#1a1a1a] cursor-pointer transition-colors hover:bg-[#141414] ${
                     selectedContact?.id === contact.id ? 'bg-[#141414]' : ''
                   }`}
@@ -163,7 +166,6 @@ export default function ContactsPage() {
               ))}
             </tbody>
           </table>
-
           {filtered.length === 0 && (
             <div className="text-center py-20 text-zinc-600 text-sm">
               {searchQuery ? 'No contacts match your search.' : 'No contacts yet. Add your first one.'}
@@ -171,25 +173,23 @@ export default function ContactsPage() {
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-8 py-2.5 border-t border-[#1e1e1e] text-xs text-zinc-600 shrink-0">
           {filtered.length} {filtered.length === 1 ? 'contact' : 'contacts'}
         </div>
       </div>
 
-      {/* ── Contact Detail Panel ── */}
+      {/* ── Detail Panel ── */}
       {selectedContact && (
-        <div className="w-72 border-l border-[#1e1e1e] bg-[#0f0f0f] flex flex-col shrink-0 overflow-y-auto">
+        <div className="w-72 border-l border-[#1e1e1e] bg-[#0f0f0f] flex flex-col shrink-0">
           <div className="px-5 py-4 border-b border-[#1e1e1e] flex items-center justify-between shrink-0">
             <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Details</span>
-            <button onClick={() => { setSelected(null); setEditing(null) }} className="text-zinc-600 hover:text-white transition-colors">
+            <button onClick={() => { setSelected(null); setEditing(null); setConfirmDelete(false) }} className="text-zinc-600 hover:text-white transition-colors">
               <X size={15} />
             </button>
           </div>
 
           {editingContact ? (
-            /* Edit mode */
-            <div className="flex-1 p-5 space-y-4">
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
               {(['name', 'organization', 'phone', 'email'] as const).map(key => (
                 <div key={key}>
                   <label className="text-xs text-zinc-500 uppercase tracking-wider capitalize">{key}</label>
@@ -215,44 +215,35 @@ export default function ContactsPage() {
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {categories.map(cat => (
                     <button
-                      key={cat}
-                      onClick={() => setEditing({ ...editingContact, categories: toggleCat(editingContact.categories, cat) })}
+                      key={cat.id}
+                      onClick={() => setEditing({ ...editingContact, categories: toggleCat(editingContact.categories, cat.name) })}
                       className={`px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors ${
-                        editingContact.categories.includes(cat)
+                        editingContact.categories.includes(cat.name)
                           ? 'border-indigo-500 bg-indigo-900/40 text-indigo-300'
                           : 'border-[#2a2a2a] text-zinc-500 hover:border-zinc-500'
                       }`}
                     >
-                      {cat}
+                      {cat.name}
                     </button>
                   ))}
                 </div>
               </div>
               <div className="flex gap-2 pt-1">
-                <button onClick={saveEdit} className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium transition-colors">
-                  Save
-                </button>
-                <button onClick={() => setEditing(null)} className="px-4 py-2 border border-[#2a2a2a] rounded-lg text-sm text-zinc-400 hover:bg-[#1a1a1a] transition-colors">
-                  Cancel
-                </button>
+                <button onClick={saveEdit} className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium transition-colors">Save</button>
+                <button onClick={() => setEditing(null)} className="px-4 py-2 border border-[#2a2a2a] rounded-lg text-sm text-zinc-400 hover:bg-[#1a1a1a] transition-colors">Cancel</button>
               </div>
             </div>
           ) : (
-            /* View mode */
-            <div className="flex-1 p-5">
+            <div className="flex-1 overflow-y-auto p-5">
               <div className="flex items-start justify-between mb-5">
                 <div>
                   <h3 className="font-semibold text-base">{selectedContact.name}</h3>
                   <p className="text-sm text-zinc-400 mt-0.5">{selectedContact.organization}</p>
                 </div>
-                <button
-                  onClick={() => setEditing({ ...selectedContact })}
-                  className="p-1.5 text-zinc-600 hover:text-white transition-colors"
-                >
+                <button onClick={() => setEditing({ ...selectedContact })} className="p-1.5 text-zinc-600 hover:text-white transition-colors">
                   <Edit2 size={13} />
                 </button>
               </div>
-
               <div className="space-y-4">
                 {[
                   { label: 'Email', value: selectedContact.email },
@@ -264,21 +255,17 @@ export default function ContactsPage() {
                     <p className="mt-1 text-sm text-white">{value || '—'}</p>
                   </div>
                 ))}
-
                 <div>
                   <p className="text-xs text-zinc-500 uppercase tracking-wider">Categories</p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {selectedContact.categories.length > 0
                       ? selectedContact.categories.map(cat => (
-                          <span key={cat} className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${getCategoryColor(cat)}`}>
-                            {cat}
-                          </span>
+                          <span key={cat} className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${getCategoryColor(cat)}`}>{cat}</span>
                         ))
                       : <span className="text-sm text-zinc-600">None</span>
                     }
                   </div>
                 </div>
-
                 {customColumns.map(col => (
                   <div key={col.key}>
                     <p className="text-xs text-zinc-500 uppercase tracking-wider">{col.label}</p>
@@ -286,6 +273,32 @@ export default function ContactsPage() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Action footer */}
+          {!editingContact && (
+            <div className="p-4 border-t border-[#1e1e1e] space-y-2 shrink-0">
+              <button
+                onClick={() => handleArchive(selectedContact.id)}
+                className="w-full flex items-center justify-center gap-2 py-2 text-sm text-zinc-400 border border-[#2a2a2a] rounded-lg hover:bg-[#1a1a1a] transition-colors"
+              >
+                <Archive size={13} /> Archive
+              </button>
+              {confirmDelete ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-red-400 flex-1">Delete permanently?</span>
+                  <button onClick={() => handleDelete(selectedContact.id)} className="text-xs font-medium text-red-400 hover:text-red-300 px-2 py-1 rounded transition-colors">Yes</button>
+                  <button onClick={() => setConfirmDelete(false)} className="text-xs text-zinc-500 hover:text-zinc-300 px-2 py-1 rounded transition-colors">No</button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="w-full flex items-center justify-center gap-2 py-2 text-sm text-red-500 border border-red-900/40 rounded-lg hover:bg-red-900/20 transition-colors"
+                >
+                  <Trash2 size={13} /> Delete
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -332,16 +345,16 @@ export default function ContactsPage() {
                 <div className="flex flex-wrap gap-1.5 mt-1">
                   {categories.map(cat => (
                     <button
-                      key={cat}
+                      key={cat.id}
                       type="button"
-                      onClick={() => setNewContact(prev => ({ ...prev, categories: toggleCat(prev.categories, cat) }))}
+                      onClick={() => setNewContact(prev => ({ ...prev, categories: toggleCat(prev.categories, cat.name) }))}
                       className={`px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors ${
-                        newContact.categories.includes(cat)
+                        newContact.categories.includes(cat.name)
                           ? 'border-indigo-500 bg-indigo-900/40 text-indigo-300'
                           : 'border-[#2a2a2a] text-zinc-500 hover:border-zinc-500'
                       }`}
                     >
-                      {cat}
+                      {cat.name}
                     </button>
                   ))}
                 </div>
@@ -349,7 +362,7 @@ export default function ContactsPage() {
             </div>
             <div className="flex gap-3 mt-6">
               <button
-                onClick={addContact}
+                onClick={handleAddContact}
                 disabled={!newContact.name.trim()}
                 className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
               >
@@ -378,14 +391,14 @@ export default function ContactsPage() {
                 placeholder="e.g. LinkedIn, Location, Notes"
                 value={newColumnLabel}
                 onChange={e => setColLabel(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addColumn()}
+                onKeyDown={e => e.key === 'Enter' && handleAddColumn()}
                 autoFocus
                 className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2.5 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
               />
             </div>
             <div className="flex gap-3 mt-5">
               <button
-                onClick={addColumn}
+                onClick={handleAddColumn}
                 disabled={!newColumnLabel.trim()}
                 className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
               >
