@@ -1,33 +1,47 @@
 'use client'
 
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import type { Contact, CustomColumn, Category, Project } from '@/types'
+import { supabase } from '@/lib/supabase'
 
-const SAMPLE_CONTACTS: Contact[] = [
-  { id: '1', name: 'Sarah Chen',     organization: 'Sequoia Capital', phone: '+1 (415) 555-0193', email: 'sarah.chen@sequoia.com',      type: 'LP',          categories: ['Venture', 'Tier 1'] },
-  { id: '2', name: 'Marcus Johnson', organization: 'Blackstone',      phone: '+1 (212) 555-0102', email: 'm.johnson@blackstone.com',    type: 'GP',          categories: ['PE', 'Tier 1'] },
-  { id: '3', name: 'Priya Patel',    organization: 'CPPIB',           phone: '+1 (416) 555-0178', email: 'priya.patel@cppib.com',       type: 'LP',          categories: ['Pension Fund'] },
-  { id: '4', name: 'David Kim',      organization: 'a16z',            phone: '+1 (650) 555-0134', email: 'd.kim@a16z.com',              type: 'LP',          categories: ['Venture'] },
-  { id: '5', name: 'Lisa Thompson',  organization: 'Hamilton Lane',   phone: '+1 (610) 555-0156', email: 'l.thompson@hamiltonlane.com', type: 'Co-investor', categories: ['FoF'] },
-]
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = Record<string, any>
 
-const SAMPLE_PROJECTS: Project[] = [
-  { id: '1', name: 'PT30 II',      type: 'fund',    description: 'Second fund vehicle targeting private equity.',    status: 'active' },
-  { id: '2', name: 'GP Raise Q3',  type: 'mandate', description: 'General partner capital raise mandate for Q3.',  status: 'pipeline' },
-]
+function dbToContact(r: Row): Contact {
+  return {
+    id:           r.id,
+    name:         r.name,
+    organization: r.organization ?? '',
+    phone:        r.phone ?? '',
+    email:        r.email ?? '',
+    type:         r.type ?? '',
+    categories:   r.categories ?? [],
+    customFields: r.custom_fields ?? {},
+  }
+}
 
-const SAMPLE_CATEGORIES: Category[] = [
-  { id: '1', name: 'LP',           color: 'blue',    description: 'Limited partners',         contactCount: 3 },
-  { id: '2', name: 'GP',           color: 'purple',  description: 'General partners',         contactCount: 1 },
-  { id: '3', name: 'Tier 1',       color: 'emerald', description: 'Top-tier relationships',   contactCount: 2 },
-  { id: '4', name: 'Venture',      color: 'amber',   description: 'Venture capital contacts', contactCount: 2 },
-  { id: '5', name: 'PE',           color: 'rose',    description: 'Private equity contacts',  contactCount: 1 },
-  { id: '6', name: 'Pension Fund', color: 'cyan',    description: 'Pension fund allocators',  contactCount: 1 },
-  { id: '7', name: 'FoF',          color: 'indigo',  description: 'Fund of funds',            contactCount: 1 },
-  { id: '8', name: 'Co-investor',  color: 'pink',    description: 'Co-investment partners',   contactCount: 1 },
-]
+function dbToProject(r: Row): Project {
+  return {
+    id:          r.id,
+    name:        r.name,
+    type:        r.type ?? 'fund',
+    description: r.description ?? '',
+    status:      r.status ?? 'pipeline',
+  }
+}
+
+function dbToCategory(r: Row, contactCount = 0): Category {
+  return {
+    id:           r.id,
+    name:         r.name,
+    color:        r.color ?? 'indigo',
+    description:  r.description ?? '',
+    contactCount,
+  }
+}
 
 interface CRMState {
+  loading: boolean
   contacts: Contact[]
   archivedContacts: Contact[]
   projects: Project[]
@@ -36,23 +50,23 @@ interface CRMState {
   archivedCategories: Category[]
   customColumns: CustomColumn[]
 
-  addContact: (c: Omit<Contact, 'id'>) => void
-  updateContact: (c: Contact) => void
-  deleteContact: (id: string) => void
-  archiveContact: (id: string) => void
-  restoreContact: (id: string) => void
+  addContact:             (c: Omit<Contact, 'id'>) => void
+  updateContact:          (c: Contact) => void
+  deleteContact:          (id: string) => void
+  archiveContact:         (id: string) => void
+  restoreContact:         (id: string) => void
   permanentDeleteContact: (id: string) => void
 
-  addProject: (p: Omit<Project, 'id'>) => void
-  deleteProject: (id: string) => void
-  archiveProject: (id: string) => void
-  restoreProject: (id: string) => void
+  addProject:             (p: Omit<Project, 'id'>) => void
+  deleteProject:          (id: string) => void
+  archiveProject:         (id: string) => void
+  restoreProject:         (id: string) => void
   permanentDeleteProject: (id: string) => void
 
-  addCategory: (c: Omit<Category, 'id' | 'contactCount'>) => void
-  deleteCategory: (id: string) => void
-  archiveCategory: (id: string) => void
-  restoreCategory: (id: string) => void
+  addCategory:             (c: Omit<Category, 'id' | 'contactCount'>) => void
+  deleteCategory:          (id: string) => void
+  archiveCategory:         (id: string) => void
+  restoreCategory:         (id: string) => void
   permanentDeleteCategory: (id: string) => void
 
   addCustomColumn: (label: string) => void
@@ -61,83 +75,194 @@ interface CRMState {
 const CRMContext = createContext<CRMState | null>(null)
 
 export function CRMProvider({ children }: { children: ReactNode }) {
-  const [contacts, setContacts]                     = useState<Contact[]>(SAMPLE_CONTACTS)
-  const [archivedContacts, setArchivedContacts]     = useState<Contact[]>([])
-  const [projects, setProjects]                     = useState<Project[]>(SAMPLE_PROJECTS)
-  const [archivedProjects, setArchivedProjects]     = useState<Project[]>([])
-  const [categories, setCategories]                 = useState<Category[]>(SAMPLE_CATEGORIES)
-  const [archivedCategories, setArchivedCategories] = useState<Category[]>([])
-  const [customColumns, setCustomColumns]           = useState<CustomColumn[]>([])
+  const [loading, setLoading]                           = useState(true)
+  const [contacts, setContacts]                         = useState<Contact[]>([])
+  const [archivedContacts, setArchivedContacts]         = useState<Contact[]>([])
+  const [projects, setProjects]                         = useState<Project[]>([])
+  const [archivedProjects, setArchivedProjects]         = useState<Project[]>([])
+  const [categories, setCategories]                     = useState<Category[]>([])
+  const [archivedCategories, setArchivedCategories]     = useState<Category[]>([])
+  const [customColumns, setCustomColumns]               = useState<CustomColumn[]>([])
 
-  // ── Contacts ──
-  const addContact = (c: Omit<Contact, 'id'>) =>
-    setContacts(prev => [...prev, { ...c, id: Date.now().toString() }])
-  const updateContact = (c: Contact) =>
-    setContacts(prev => prev.map(x => x.id === c.id ? c : x))
-  const deleteContact = (id: string) =>
-    setContacts(prev => prev.filter(c => c.id !== id))
+  function withCounts(catRows: Row[], activeContacts: Contact[]): Category[] {
+    return catRows.map(r => dbToCategory(r, activeContacts.filter(c => c.categories.includes(r.name)).length))
+  }
+
+  useEffect(() => {
+    async function load() {
+      const [
+        { data: cRows },
+        { data: pRows },
+        { data: catRows },
+        { data: colRows },
+      ] = await Promise.all([
+        supabase.from('contacts').select('*').order('created_at'),
+        supabase.from('projects').select('*').order('created_at'),
+        supabase.from('categories').select('*').order('created_at'),
+        supabase.from('custom_columns').select('*').order('created_at'),
+      ])
+
+      const activeC   = (cRows ?? []).filter(r => !r.archived).map(dbToContact)
+      const archivedC = (cRows ?? []).filter(r =>  r.archived).map(dbToContact)
+      const activeP   = (pRows ?? []).filter(r => !r.archived).map(dbToProject)
+      const archivedP = (pRows ?? []).filter(r =>  r.archived).map(dbToProject)
+      const activeCat   = (catRows ?? []).filter(r => !r.archived)
+      const archivedCat = (catRows ?? []).filter(r =>  r.archived)
+
+      setContacts(activeC)
+      setArchivedContacts(archivedC)
+      setProjects(activeP)
+      setArchivedProjects(archivedP)
+      setCategories(withCounts(activeCat, activeC))
+      setArchivedCategories(archivedCat.map(r => dbToCategory(r, 0)))
+      setCustomColumns((colRows ?? []).map(r => ({ id: r.id, label: r.label, key: r.key })))
+      setLoading(false)
+    }
+    load()
+  }, [])
+
+  // ── Contacts ──────────────────────────────────────────────────────────────
+
+  const addContact = (c: Omit<Contact, 'id'>) => {
+    supabase.from('contacts').insert({
+      name: c.name, organization: c.organization, phone: c.phone,
+      email: c.email, type: c.type, categories: c.categories,
+      custom_fields: c.customFields ?? {},
+    }).select().single().then(({ data }) => {
+      if (data) setContacts(prev => [...prev, dbToContact(data)])
+    })
+  }
+
+  const updateContact = (c: Contact) => {
+    supabase.from('contacts').update({
+      name: c.name, organization: c.organization, phone: c.phone,
+      email: c.email, type: c.type, categories: c.categories,
+      custom_fields: c.customFields ?? {},
+    }).eq('id', c.id).then(() => {
+      setContacts(prev => prev.map(x => x.id === c.id ? c : x))
+    })
+  }
+
+  const deleteContact = (id: string) => {
+    supabase.from('contacts').delete().eq('id', id).then(() => {
+      setContacts(prev => prev.filter(c => c.id !== id))
+    })
+  }
+
   const archiveContact = (id: string) => {
     const item = contacts.find(c => c.id === id)
     if (!item) return
-    setContacts(prev => prev.filter(c => c.id !== id))
-    setArchivedContacts(prev => [...prev, item])
+    supabase.from('contacts').update({ archived: true }).eq('id', id).then(() => {
+      setContacts(prev => prev.filter(c => c.id !== id))
+      setArchivedContacts(prev => [...prev, item])
+    })
   }
+
   const restoreContact = (id: string) => {
     const item = archivedContacts.find(c => c.id === id)
     if (!item) return
-    setArchivedContacts(prev => prev.filter(c => c.id !== id))
-    setContacts(prev => [...prev, item])
+    supabase.from('contacts').update({ archived: false }).eq('id', id).then(() => {
+      setArchivedContacts(prev => prev.filter(c => c.id !== id))
+      setContacts(prev => [...prev, item])
+    })
   }
-  const permanentDeleteContact = (id: string) =>
-    setArchivedContacts(prev => prev.filter(c => c.id !== id))
 
-  // ── Projects ──
-  const addProject = (p: Omit<Project, 'id'>) =>
-    setProjects(prev => [...prev, { ...p, id: Date.now().toString() }])
-  const deleteProject = (id: string) =>
-    setProjects(prev => prev.filter(p => p.id !== id))
+  const permanentDeleteContact = (id: string) => {
+    supabase.from('contacts').delete().eq('id', id).then(() => {
+      setArchivedContacts(prev => prev.filter(c => c.id !== id))
+    })
+  }
+
+  // ── Projects ──────────────────────────────────────────────────────────────
+
+  const addProject = (p: Omit<Project, 'id'>) => {
+    supabase.from('projects').insert({
+      name: p.name, type: p.type, description: p.description, status: p.status,
+    }).select().single().then(({ data }) => {
+      if (data) setProjects(prev => [...prev, dbToProject(data)])
+    })
+  }
+
+  const deleteProject = (id: string) => {
+    supabase.from('projects').delete().eq('id', id).then(() => {
+      setProjects(prev => prev.filter(p => p.id !== id))
+    })
+  }
+
   const archiveProject = (id: string) => {
     const item = projects.find(p => p.id === id)
     if (!item) return
-    setProjects(prev => prev.filter(p => p.id !== id))
-    setArchivedProjects(prev => [...prev, item])
+    supabase.from('projects').update({ archived: true }).eq('id', id).then(() => {
+      setProjects(prev => prev.filter(p => p.id !== id))
+      setArchivedProjects(prev => [...prev, item])
+    })
   }
+
   const restoreProject = (id: string) => {
     const item = archivedProjects.find(p => p.id === id)
     if (!item) return
-    setArchivedProjects(prev => prev.filter(p => p.id !== id))
-    setProjects(prev => [...prev, item])
+    supabase.from('projects').update({ archived: false }).eq('id', id).then(() => {
+      setArchivedProjects(prev => prev.filter(p => p.id !== id))
+      setProjects(prev => [...prev, item])
+    })
   }
-  const permanentDeleteProject = (id: string) =>
-    setArchivedProjects(prev => prev.filter(p => p.id !== id))
 
-  // ── Categories ──
-  const addCategory = (c: Omit<Category, 'id' | 'contactCount'>) =>
-    setCategories(prev => [...prev, { ...c, id: Date.now().toString(), contactCount: 0 }])
-  const deleteCategory = (id: string) =>
-    setCategories(prev => prev.filter(c => c.id !== id))
+  const permanentDeleteProject = (id: string) => {
+    supabase.from('projects').delete().eq('id', id).then(() => {
+      setArchivedProjects(prev => prev.filter(p => p.id !== id))
+    })
+  }
+
+  // ── Categories ────────────────────────────────────────────────────────────
+
+  const addCategory = (c: Omit<Category, 'id' | 'contactCount'>) => {
+    supabase.from('categories').insert({
+      name: c.name, color: c.color, description: c.description,
+    }).select().single().then(({ data }) => {
+      if (data) setCategories(prev => [...prev, dbToCategory(data, 0)])
+    })
+  }
+
+  const deleteCategory = (id: string) => {
+    supabase.from('categories').delete().eq('id', id).then(() => {
+      setCategories(prev => prev.filter(c => c.id !== id))
+    })
+  }
+
   const archiveCategory = (id: string) => {
     const item = categories.find(c => c.id === id)
     if (!item) return
-    setCategories(prev => prev.filter(c => c.id !== id))
-    setArchivedCategories(prev => [...prev, item])
+    supabase.from('categories').update({ archived: true }).eq('id', id).then(() => {
+      setCategories(prev => prev.filter(c => c.id !== id))
+      setArchivedCategories(prev => [...prev, item])
+    })
   }
+
   const restoreCategory = (id: string) => {
     const item = archivedCategories.find(c => c.id === id)
     if (!item) return
-    setArchivedCategories(prev => prev.filter(c => c.id !== id))
-    setCategories(prev => [...prev, item])
+    supabase.from('categories').update({ archived: false }).eq('id', id).then(() => {
+      setArchivedCategories(prev => prev.filter(c => c.id !== id))
+      setCategories(prev => [...prev, item])
+    })
   }
-  const permanentDeleteCategory = (id: string) =>
-    setArchivedCategories(prev => prev.filter(c => c.id !== id))
+
+  const permanentDeleteCategory = (id: string) => {
+    supabase.from('categories').delete().eq('id', id).then(() => {
+      setArchivedCategories(prev => prev.filter(c => c.id !== id))
+    })
+  }
 
   const addCustomColumn = (label: string) => {
     const key = label.toLowerCase().replace(/\s+/g, '_')
-    setCustomColumns(prev => [...prev, { id: Date.now().toString(), label, key }])
+    supabase.from('custom_columns').insert({ label, key }).select().single().then(({ data }) => {
+      if (data) setCustomColumns(prev => [...prev, { id: data.id, label: data.label, key: data.key }])
+    })
   }
 
   return (
     <CRMContext.Provider value={{
+      loading,
       contacts, archivedContacts,
       projects, archivedProjects,
       categories, archivedCategories,
