@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { Plus, X, Search, Edit2, Archive, Trash2 } from 'lucide-react'
+import { useState, useRef } from 'react'
+import { Plus, X, Search, Edit2, Archive, Trash2, Upload, Download } from 'lucide-react'
 import { useCRM } from '@/context/CRMContext'
 import type { Contact } from '@/types'
 
@@ -26,20 +26,58 @@ function toggleCat(arr: string[], cat: string) {
   return arr.includes(cat) ? arr.filter(c => c !== cat) : [...arr, cat]
 }
 
+// ── CSV helpers ─────────────────────────────────────────────────────────────
+
+function parseCSVLine(line: string): string[] {
+  const result: string[] = []
+  let current = ''
+  let inQuotes = false
+  for (const char of line) {
+    if (char === '"') {
+      inQuotes = !inQuotes
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim())
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  result.push(current.trim())
+  return result
+}
+
+function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
+  const lines = text.split(/\r?\n/).filter(l => l.trim())
+  if (lines.length < 2) return { headers: [], rows: [] }
+  const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, '_'))
+  const rows = lines.slice(1).map(line => {
+    const vals = parseCSVLine(line)
+    return Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? '']))
+  }).filter(row => row['name']?.trim())
+  return { headers, rows }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
 export default function ContactsPage() {
   const {
     contacts, categories, customColumns,
     addContact, updateContact, deleteContact, archiveContact, addCustomColumn,
+    importLogs, bulkAddContacts,
   } = useCRM()
 
   const [selectedContact, setSelected]   = useState<Contact | null>(null)
   const [editingContact, setEditing]      = useState<Contact | null>(null)
   const [isAddingContact, setAddContact]  = useState(false)
   const [isAddingColumn, setAddColumn]    = useState(false)
+  const [isUploadingCSV, setUploadCSV]    = useState(false)
   const [searchQuery, setSearch]          = useState('')
   const [newContact, setNewContact]       = useState({ ...BLANK })
   const [newColumnLabel, setColLabel]     = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [csvRows, setCsvRows]             = useState<Record<string, string>[]>([])
+  const [csvFilename, setCsvFilename]     = useState('')
+  const fileInputRef                      = useRef<HTMLInputElement>(null)
 
   const filtered = contacts.filter(c =>
     [c.name, c.organization, c.email].some(v =>
@@ -79,6 +117,59 @@ export default function ContactsPage() {
     setSelected(null)
     setEditing(null)
     setConfirmDelete(false)
+  }
+
+  function closeUploadModal() {
+    setUploadCSV(false)
+    setCsvRows([])
+    setCsvFilename('')
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function downloadTemplate() {
+    const standardHeaders = ['name', 'organization', 'phone', 'email', 'type', 'categories']
+    const customHeaders   = customColumns.map(c => c.key)
+    const allHeaders      = [...standardHeaders, ...customHeaders]
+    const exampleRow      = [
+      'Jane Smith', 'BlackRock', '+1 (212) 555-0100', 'jane@blackrock.com', 'LP', 'LP|Tier 1',
+      ...customHeaders.map(() => ''),
+    ]
+    const csv  = [allHeaders.join(','), exampleRow.join(',')].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = 'contacts_template.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function handleFileSelect(file: File) {
+    if (!file.name.toLowerCase().endsWith('.csv')) return
+    setCsvFilename(file.name)
+    const reader = new FileReader()
+    reader.onload = e => {
+      const { rows } = parseCSV((e.target?.result as string) ?? '')
+      setCsvRows(rows)
+    }
+    reader.readAsText(file)
+  }
+
+  function handleImport() {
+    if (!csvRows.length) return
+    const mapped: Omit<Contact, 'id'>[] = csvRows.map(row => ({
+      name:         row['name'] ?? '',
+      organization: row['organization'] ?? '',
+      phone:        row['phone'] ?? '',
+      email:        row['email'] ?? '',
+      type:         row['type'] || 'LP',
+      categories:   row['categories']
+        ? row['categories'].split('|').map(s => s.trim()).filter(Boolean)
+        : [],
+      customFields: Object.fromEntries(customColumns.map(c => [c.key, row[c.key] ?? ''])),
+    }))
+    bulkAddContacts(mapped, csvFilename)
+    closeUploadModal()
   }
 
   const allColumns = [
@@ -173,8 +264,17 @@ export default function ContactsPage() {
           )}
         </div>
 
-        <div className="px-8 py-2.5 border-t border-[#1e1e1e] text-xs text-zinc-600 shrink-0">
-          {filtered.length} {filtered.length === 1 ? 'contact' : 'contacts'}
+        {/* Footer */}
+        <div className="px-8 py-2.5 border-t border-[#1e1e1e] flex items-center justify-between shrink-0">
+          <span className="text-xs text-zinc-600">
+            {filtered.length} {filtered.length === 1 ? 'contact' : 'contacts'}
+          </span>
+          <button
+            onClick={() => setUploadCSV(true)}
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            <Upload size={12} /> Upload CSV
+          </button>
         </div>
       </div>
 
@@ -276,7 +376,6 @@ export default function ContactsPage() {
             </div>
           )}
 
-          {/* Action footer */}
           {!editingContact && (
             <div className="p-4 border-t border-[#1e1e1e] space-y-2 shrink-0">
               <button
@@ -405,6 +504,129 @@ export default function ContactsPage() {
                 Add Column
               </button>
               <button onClick={() => setAddColumn(false)} className="px-5 py-2.5 border border-[#2a2a2a] rounded-lg text-sm text-zinc-400 hover:bg-[#1a1a1a] transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Upload CSV Modal ── */}
+      {isUploadingCSV && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={closeUploadModal}>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-xl w-[620px] p-6 max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-semibold">Import Contacts</h3>
+              <button onClick={closeUploadModal} className="text-zinc-500 hover:text-white"><X size={15} /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-0.5">
+              {/* Download template */}
+              <div className="flex items-center justify-between bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-white">CSV Template</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">Download headers matching your current columns</p>
+                </div>
+                <button
+                  onClick={downloadTemplate}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 border border-indigo-900/50 rounded-lg hover:bg-indigo-900/20 transition-colors whitespace-nowrap"
+                >
+                  <Download size={12} /> Download Template
+                </button>
+              </div>
+
+              {/* Drop zone or preview */}
+              {csvRows.length === 0 ? (
+                <div
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFileSelect(f) }}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-[#2a2a2a] rounded-lg py-12 flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-zinc-600 transition-colors"
+                >
+                  <Upload size={22} className="text-zinc-600" />
+                  <p className="text-sm text-zinc-400">
+                    Drop your CSV here, or <span className="text-indigo-400 font-medium">browse file</span>
+                  </p>
+                  <p className="text-xs text-zinc-600">Only .csv files · categories separated by |</p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(f) }}
+                  />
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wider">{csvFilename} — {csvRows.length} rows</p>
+                    <button
+                      onClick={() => { setCsvRows([]); setCsvFilename(''); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                      className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto rounded-lg border border-[#2a2a2a]">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-[#2a2a2a] bg-[#1a1a1a]">
+                          {['name', 'organization', 'email', 'type', 'categories'].map(h => (
+                            <th key={h} className="text-left px-3 py-2 text-zinc-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {csvRows.slice(0, 6).map((row, i) => (
+                          <tr key={i} className="border-b border-[#1e1e1e] last:border-0">
+                            <td className="px-3 py-2 text-white whitespace-nowrap">{row['name'] || '—'}</td>
+                            <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{row['organization'] || '—'}</td>
+                            <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{row['email'] || '—'}</td>
+                            <td className="px-3 py-2 text-zinc-400">{row['type'] || '—'}</td>
+                            <td className="px-3 py-2 text-zinc-400">{row['categories'] || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {csvRows.length > 6 && (
+                    <p className="text-xs text-zinc-600 mt-2 pl-1">+{csvRows.length - 6} more rows</p>
+                  )}
+                </div>
+              )}
+
+              {/* Import history */}
+              {importLogs.length > 0 && (
+                <div>
+                  <p className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Import History</p>
+                  <div className="space-y-1">
+                    {importLogs.slice(0, 8).map(log => (
+                      <div key={log.id} className="flex items-center justify-between px-3 py-2 bg-[#1a1a1a] rounded-lg">
+                        <span className="text-xs text-zinc-400 truncate mr-3">{log.filename}</span>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="text-xs text-zinc-600">{log.rowCount} contacts</span>
+                          <span className="text-xs text-zinc-700">
+                            {new Date(log.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-5 pt-5 border-t border-[#1e1e1e]">
+              <button
+                onClick={handleImport}
+                disabled={csvRows.length === 0}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
+              >
+                {csvRows.length > 0
+                  ? `Import ${csvRows.length} contact${csvRows.length !== 1 ? 's' : ''}`
+                  : 'Import Contacts'}
+              </button>
+              <button onClick={closeUploadModal} className="px-5 py-2.5 border border-[#2a2a2a] rounded-lg text-sm text-zinc-400 hover:bg-[#1a1a1a] transition-colors">
                 Cancel
               </button>
             </div>

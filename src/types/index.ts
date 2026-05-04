@@ -30,3 +30,10 @@ export interface Project {
   description: string
   status: 'active' | 'pipeline' | 'closed'
 }
+
+export interface ImportLog {
+  id: string
+  filename: string
+  rowCount: number
+  createdAt: string
+}

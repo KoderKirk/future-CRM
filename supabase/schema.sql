@@ -49,3 +49,13 @@ CREATE POLICY "anon_all" ON contacts       FOR ALL TO anon USING (true) WITH CHE
 CREATE POLICY "anon_all" ON projects       FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "anon_all" ON categories     FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "anon_all" ON custom_columns FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE TABLE IF NOT EXISTS import_logs (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  filename   text NOT NULL,
+  row_count  int  NOT NULL DEFAULT 0,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE import_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_all" ON import_logs FOR ALL TO anon USING (true) WITH CHECK (true);

@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
-import type { Contact, CustomColumn, Category, Project } from '@/types'
+import type { Contact, CustomColumn, Category, Project, ImportLog } from '@/types'
 import { supabase } from '@/lib/supabase'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,6 +70,9 @@ interface CRMState {
   permanentDeleteCategory: (id: string) => void
 
   addCustomColumn: (label: string) => void
+
+  importLogs: ImportLog[]
+  bulkAddContacts: (contacts: Omit<Contact, 'id'>[], filename: string) => void
 }
 
 const CRMContext = createContext<CRMState | null>(null)
@@ -83,6 +86,7 @@ export function CRMProvider({ children }: { children: ReactNode }) {
   const [categories, setCategories]                     = useState<Category[]>([])
   const [archivedCategories, setArchivedCategories]     = useState<Category[]>([])
   const [customColumns, setCustomColumns]               = useState<CustomColumn[]>([])
+  const [importLogs, setImportLogs]                     = useState<ImportLog[]>([])
 
   function withCounts(catRows: Row[], activeContacts: Contact[]): Category[] {
     return catRows.map(r => dbToCategory(r, activeContacts.filter(c => c.categories.includes(r.name)).length))
@@ -95,11 +99,13 @@ export function CRMProvider({ children }: { children: ReactNode }) {
         { data: pRows },
         { data: catRows },
         { data: colRows },
+        { data: logRows },
       ] = await Promise.all([
         supabase.from('contacts').select('*').order('created_at'),
         supabase.from('projects').select('*').order('created_at'),
         supabase.from('categories').select('*').order('created_at'),
         supabase.from('custom_columns').select('*').order('created_at'),
+        supabase.from('import_logs').select('*').order('created_at', { ascending: false }).limit(20),
       ])
 
       const activeC   = (cRows ?? []).filter(r => !r.archived).map(dbToContact)
@@ -116,6 +122,7 @@ export function CRMProvider({ children }: { children: ReactNode }) {
       setCategories(withCounts(activeCat, activeC))
       setArchivedCategories(archivedCat.map(r => dbToCategory(r, 0)))
       setCustomColumns((colRows ?? []).map(r => ({ id: r.id, label: r.label, key: r.key })))
+      setImportLogs((logRows ?? []).map(r => ({ id: r.id, filename: r.filename, rowCount: r.row_count, createdAt: r.created_at })))
       setLoading(false)
     }
     load()
@@ -253,6 +260,23 @@ export function CRMProvider({ children }: { children: ReactNode }) {
     })
   }
 
+  const bulkAddContacts = (newContacts: Omit<Contact, 'id'>[], filename: string) => {
+    const rows = newContacts.map(c => ({
+      name: c.name, organization: c.organization, phone: c.phone,
+      email: c.email, type: c.type, categories: c.categories,
+      custom_fields: c.customFields ?? {},
+    }))
+    supabase.from('contacts').insert(rows).select().then(({ data }) => {
+      if (data) setContacts(prev => [...prev, ...data.map(dbToContact)])
+      supabase.from('import_logs')
+        .insert({ filename, row_count: newContacts.length })
+        .select().single()
+        .then(({ data: log }) => {
+          if (log) setImportLogs(prev => [{ id: log.id, filename: log.filename, rowCount: log.row_count, createdAt: log.created_at }, ...prev])
+        })
+    })
+  }
+
   const addCustomColumn = (label: string) => {
     const key = label.toLowerCase().replace(/\s+/g, '_')
     supabase.from('custom_columns').insert({ label, key }).select().single().then(({ data }) => {
@@ -271,6 +295,7 @@ export function CRMProvider({ children }: { children: ReactNode }) {
       addProject, deleteProject, archiveProject, restoreProject, permanentDeleteProject,
       addCategory, deleteCategory, archiveCategory, restoreCategory, permanentDeleteCategory,
       addCustomColumn,
+      importLogs, bulkAddContacts,
     }}>
       {children}
     </CRMContext.Provider>
