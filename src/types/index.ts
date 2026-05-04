@@ -37,3 +37,9 @@ export interface ImportLog {
   rowCount: number
   createdAt: string
 }
+
+export interface ProjectContact {
+  projectId: string
+  contactId: string
+  createdAt: string
+}

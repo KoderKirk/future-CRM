@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Plus, X, Briefcase, Archive, Trash2 } from 'lucide-react'
 import { useCRM } from '@/context/CRMContext'
 import type { Project } from '@/types'
@@ -15,6 +16,7 @@ const BLANK = { name: '', type: 'fund' as Project['type'], description: '', stat
 
 export default function ProjectsPage() {
   const { projects, addProject, deleteProject, archiveProject } = useCRM()
+  const router                        = useRouter()
   const [isAdding, setAdding]         = useState(false)
   const [form, setForm]               = useState({ ...BLANK })
   const [confirmDeleteId, setConfirm] = useState<string | null>(null)
@@ -40,7 +42,7 @@ export default function ProjectsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {projects.map(project => (
-          <div key={project.id} className="bg-[#111] border border-[#1e1e1e] rounded-xl p-5 hover:border-[#2a2a2a] transition-colors group relative">
+          <div key={project.id} onClick={() => router.push(`/projects/${project.id}`)} className="bg-[#111] border border-[#1e1e1e] rounded-xl p-5 hover:border-[#2a2a2a] transition-colors group relative cursor-pointer">
             <div className="flex items-start justify-between">
               <div className="p-2 bg-[#1a1a1a] rounded-lg">
                 <Briefcase size={15} className="text-indigo-400" />
@@ -51,21 +53,21 @@ export default function ProjectsPage() {
                 </span>
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
                   <button
-                    onClick={() => archiveProject(project.id)}
+                    onClick={e => { e.stopPropagation(); archiveProject(project.id) }}
                     title="Archive"
                     className="p-1.5 text-zinc-500 hover:text-zinc-200 hover:bg-[#2a2a2a] rounded transition-colors"
                   >
                     <Archive size={13} />
                   </button>
                   {confirmDeleteId === project.id ? (
-                    <div className="flex items-center gap-1 bg-[#1e1010] border border-red-900/40 rounded px-2 py-1">
+                    <div className="flex items-center gap-1 bg-[#1e1010] border border-red-900/40 rounded px-2 py-1" onClick={e => e.stopPropagation()}>
                       <span className="text-xs text-red-400">Delete?</span>
                       <button onClick={() => { deleteProject(project.id); setConfirm(null) }} className="text-xs font-medium text-red-400 hover:text-red-300 px-1">Yes</button>
                       <button onClick={() => setConfirm(null)} className="text-xs text-zinc-500 hover:text-zinc-300 px-1">No</button>
                     </div>
                   ) : (
                     <button
-                      onClick={() => setConfirm(project.id)}
+                      onClick={e => { e.stopPropagation(); setConfirm(project.id) }}
                       title="Delete"
                       className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors"
                     >

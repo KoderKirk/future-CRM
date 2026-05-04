@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { Plus, X, Search, Edit2, Archive, Trash2, Upload, Download } from 'lucide-react'
+import { Plus, X, Search, Edit2, Archive, Trash2, Upload, Download, Briefcase } from 'lucide-react'
 import { useCRM } from '@/context/CRMContext'
 import type { Contact } from '@/types'
 
@@ -19,6 +19,12 @@ function getCategoryColor(cat: string) {
   return CATEGORY_COLORS[cat] ?? 'bg-zinc-800 text-zinc-300'
 }
 
+const STATUS_STYLES: Record<string, string> = {
+  active:   'bg-emerald-900/40 text-emerald-300',
+  pipeline: 'bg-amber-900/40 text-amber-300',
+  closed:   'bg-zinc-800 text-zinc-400',
+}
+
 const CONTACT_TYPES = ['LP', 'GP', 'Advisor', 'Co-investor', 'Service Provider', 'Portfolio', 'Other']
 const BLANK = { name: '', organization: '', phone: '', email: '', type: 'LP', categories: [] as string[] }
 
@@ -26,21 +32,16 @@ function toggleCat(arr: string[], cat: string) {
   return arr.includes(cat) ? arr.filter(c => c !== cat) : [...arr, cat]
 }
 
-// ── CSV helpers ─────────────────────────────────────────────────────────────
+// ── CSV helpers ──────────────────────────────────────────────────────────────
 
 function parseCSVLine(line: string): string[] {
   const result: string[] = []
   let current = ''
   let inQuotes = false
   for (const char of line) {
-    if (char === '"') {
-      inQuotes = !inQuotes
-    } else if (char === ',' && !inQuotes) {
-      result.push(current.trim())
-      current = ''
-    } else {
-      current += char
-    }
+    if (char === '"') { inQuotes = !inQuotes }
+    else if (char === ',' && !inQuotes) { result.push(current.trim()); current = '' }
+    else { current += char }
   }
   result.push(current.trim())
   return result
@@ -61,9 +62,10 @@ function parseCSV(text: string): { headers: string[]; rows: Record<string, strin
 
 export default function ContactsPage() {
   const {
-    contacts, categories, customColumns,
+    contacts, categories, customColumns, projects,
     addContact, updateContact, deleteContact, archiveContact, addCustomColumn,
     importLogs, bulkAddContacts,
+    commitContactsToProject,
   } = useCRM()
 
   const [selectedContact, setSelected]   = useState<Contact | null>(null)
@@ -71,10 +73,13 @@ export default function ContactsPage() {
   const [isAddingContact, setAddContact]  = useState(false)
   const [isAddingColumn, setAddColumn]    = useState(false)
   const [isUploadingCSV, setUploadCSV]    = useState(false)
+  const [showCommitModal, setCommitModal] = useState(false)
+  const [commitProjectId, setCommitPId]   = useState('')
   const [searchQuery, setSearch]          = useState('')
   const [newContact, setNewContact]       = useState({ ...BLANK })
   const [newColumnLabel, setColLabel]     = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [selectedIds, setSelectedIds]     = useState<string[]>([])
   const [csvRows, setCsvRows]             = useState<Record<string, string>[]>([])
   const [csvFilename, setCsvFilename]     = useState('')
   const fileInputRef                      = useRef<HTMLInputElement>(null)
@@ -84,6 +89,22 @@ export default function ContactsPage() {
       v.toLowerCase().includes(searchQuery.toLowerCase())
     )
   )
+
+  const allSelected = filtered.length > 0 && filtered.every(c => selectedIds.includes(c.id))
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelectedIds([])
+    } else {
+      setSelectedIds(filtered.map(c => c.id))
+    }
+  }
+
+  function toggleSelectOne(id: string) {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+  }
 
   function handleAddContact() {
     if (!newContact.name.trim()) return
@@ -130,10 +151,7 @@ export default function ContactsPage() {
     const standardHeaders = ['name', 'organization', 'phone', 'email', 'type', 'categories']
     const customHeaders   = customColumns.map(c => c.key)
     const allHeaders      = [...standardHeaders, ...customHeaders]
-    const exampleRow      = [
-      'Jane Smith', 'BlackRock', '+1 (212) 555-0100', 'jane@blackrock.com', 'LP', 'LP|Tier 1',
-      ...customHeaders.map(() => ''),
-    ]
+    const exampleRow      = ['Jane Smith', 'BlackRock', '+1 (212) 555-0100', 'jane@blackrock.com', 'LP', 'LP|Tier 1', ...customHeaders.map(() => '')]
     const csv  = [allHeaders.join(','), exampleRow.join(',')].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url  = URL.createObjectURL(blob)
@@ -163,14 +181,22 @@ export default function ContactsPage() {
       phone:        row['phone'] ?? '',
       email:        row['email'] ?? '',
       type:         row['type'] || 'LP',
-      categories:   row['categories']
-        ? row['categories'].split('|').map(s => s.trim()).filter(Boolean)
-        : [],
+      categories:   row['categories'] ? row['categories'].split('|').map(s => s.trim()).filter(Boolean) : [],
       customFields: Object.fromEntries(customColumns.map(c => [c.key, row[c.key] ?? ''])),
     }))
     bulkAddContacts(mapped, csvFilename)
     closeUploadModal()
   }
+
+  function handleCommit() {
+    if (!commitProjectId || selectedIds.length === 0) return
+    commitContactsToProject(selectedIds, commitProjectId)
+    setSelectedIds([])
+    setCommitModal(false)
+    setCommitPId('')
+  }
+
+  const committableProjects = projects.filter(p => p.status !== 'closed')
 
   const allColumns = [
     { key: 'name',         label: 'Name' },
@@ -186,6 +212,7 @@ export default function ContactsPage() {
     <div className="flex h-full">
       {/* ── Table ── */}
       <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
         <div className="px-8 py-5 border-b border-[#1e1e1e] flex items-center justify-between gap-4 shrink-0">
           <h2 className="text-lg font-semibold">Contacts</h2>
           <div className="flex items-center gap-2.5">
@@ -214,10 +241,41 @@ export default function ContactsPage() {
           </div>
         </div>
 
+        {/* Selection action bar */}
+        {selectedIds.length > 0 && (
+          <div className="px-8 py-2 bg-indigo-950/60 border-b border-indigo-900/40 flex items-center gap-3 shrink-0">
+            <span className="text-sm text-indigo-300 font-medium">
+              {selectedIds.length} selected
+            </span>
+            <div className="w-px h-4 bg-indigo-900/60" />
+            <button
+              onClick={() => setCommitModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors font-medium"
+            >
+              <Briefcase size={12} /> Commit to Pipeline
+            </button>
+            <button
+              onClick={() => setSelectedIds([])}
+              className="ml-auto text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+
+        {/* Table */}
         <div className="flex-1 overflow-auto">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-[#0a0a0a] z-10">
               <tr className="border-b border-[#1e1e1e]">
+                <th className="w-10 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                    className="w-3.5 h-3.5 rounded accent-indigo-600 cursor-pointer"
+                  />
+                </th>
                 {allColumns.map(col => (
                   <th key={col.key} className="text-left px-6 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider whitespace-nowrap">
                     {col.label}
@@ -232,8 +290,16 @@ export default function ContactsPage() {
                   onClick={() => { setSelected(contact); setEditing(null); setConfirmDelete(false) }}
                   className={`border-b border-[#1a1a1a] cursor-pointer transition-colors hover:bg-[#141414] ${
                     selectedContact?.id === contact.id ? 'bg-[#141414]' : ''
-                  }`}
+                  } ${selectedIds.includes(contact.id) ? 'bg-indigo-950/20' : ''}`}
                 >
+                  <td className="w-10 px-4 py-3.5" onClick={e => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(contact.id)}
+                      onChange={() => toggleSelectOne(contact.id)}
+                      className="w-3.5 h-3.5 rounded accent-indigo-600 cursor-pointer"
+                    />
+                  </td>
                   <td className="px-6 py-3.5 font-medium text-white whitespace-nowrap">{contact.name}</td>
                   <td className="px-6 py-3.5 text-zinc-400 whitespace-nowrap">{contact.organization}</td>
                   <td className="px-6 py-3.5 text-zinc-400 whitespace-nowrap">{contact.phone}</td>
@@ -511,6 +577,60 @@ export default function ContactsPage() {
         </div>
       )}
 
+      {/* ── Commit to Pipeline Modal ── */}
+      {showCommitModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => { setCommitModal(false); setCommitPId('') }}>
+          <div className="bg-[#111] border border-[#2a2a2a] rounded-xl w-[420px] p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-semibold">Commit to Pipeline</h3>
+              <button onClick={() => { setCommitModal(false); setCommitPId('') }} className="text-zinc-500 hover:text-white"><X size={15} /></button>
+            </div>
+            <p className="text-xs text-zinc-500 mb-5">
+              {selectedIds.length} contact{selectedIds.length !== 1 ? 's' : ''} will be linked to the selected project
+            </p>
+
+            {committableProjects.length === 0 ? (
+              <p className="text-sm text-zinc-600 py-4 text-center">No active or pipeline projects found.</p>
+            ) : (
+              <div className="space-y-2">
+                {committableProjects.map(project => (
+                  <button
+                    key={project.id}
+                    onClick={() => setCommitPId(project.id)}
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-colors text-left ${
+                      commitProjectId === project.id
+                        ? 'border-indigo-500 bg-indigo-900/20'
+                        : 'border-[#2a2a2a] hover:border-[#3a3a3a] hover:bg-[#1a1a1a]'
+                    }`}
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-white">{project.name}</p>
+                      <p className="text-xs text-zinc-500 mt-0.5 capitalize">{project.type}</p>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[project.status] ?? ''}`}>
+                      {project.status}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-3 mt-5">
+              <button
+                onClick={handleCommit}
+                disabled={!commitProjectId}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
+              >
+                Commit
+              </button>
+              <button onClick={() => { setCommitModal(false); setCommitPId('') }} className="px-5 py-2.5 border border-[#2a2a2a] rounded-lg text-sm text-zinc-400 hover:bg-[#1a1a1a] transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Upload CSV Modal ── */}
       {isUploadingCSV && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={closeUploadModal}>
@@ -521,7 +641,6 @@ export default function ContactsPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-4 pr-0.5">
-              {/* Download template */}
               <div className="flex items-center justify-between bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-4 py-3">
                 <div>
                   <p className="text-sm font-medium text-white">CSV Template</p>
@@ -535,7 +654,6 @@ export default function ContactsPage() {
                 </button>
               </div>
 
-              {/* Drop zone or preview */}
               {csvRows.length === 0 ? (
                 <div
                   onDragOver={e => e.preventDefault()}
@@ -595,7 +713,6 @@ export default function ContactsPage() {
                 </div>
               )}
 
-              {/* Import history */}
               {importLogs.length > 0 && (
                 <div>
                   <p className="text-xs text-zinc-500 uppercase tracking-wider mb-2">Import History</p>
@@ -622,9 +739,7 @@ export default function ContactsPage() {
                 disabled={csvRows.length === 0}
                 className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
               >
-                {csvRows.length > 0
-                  ? `Import ${csvRows.length} contact${csvRows.length !== 1 ? 's' : ''}`
-                  : 'Import Contacts'}
+                {csvRows.length > 0 ? `Import ${csvRows.length} contact${csvRows.length !== 1 ? 's' : ''}` : 'Import Contacts'}
               </button>
               <button onClick={closeUploadModal} className="px-5 py-2.5 border border-[#2a2a2a] rounded-lg text-sm text-zinc-400 hover:bg-[#1a1a1a] transition-colors">
                 Cancel

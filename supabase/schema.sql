@@ -59,3 +59,14 @@ CREATE TABLE IF NOT EXISTS import_logs (
 
 ALTER TABLE import_logs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "anon_all" ON import_logs FOR ALL TO anon USING (true) WITH CHECK (true);
+
+CREATE TABLE IF NOT EXISTS project_contacts (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id uuid NOT NULL,
+  contact_id uuid NOT NULL,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE(project_id, contact_id)
+);
+
+ALTER TABLE project_contacts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_all" ON project_contacts FOR ALL TO anon USING (true) WITH CHECK (true);
